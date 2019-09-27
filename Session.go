@@ -3,21 +3,39 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-var users = map[string]string{
-	"user1": "password1",
-	"user2": "password2",
-}
+var users = map[string]string{}
 
 // Credentials is a struct that models the structure of a user, both in the request body, and in the DB
 type Credentials struct {
 	Password string `json:"password"`
 	Username string `json:"username"`
+}
+
+// AddUser is a function
+func AddUser(w http.ResponseWriter, r *http.Request) {
+	log.Print("Received AddUser request")
+	var creds Credentials
+
+	// Get the JSON body and decode into credentials
+	err := json.NewDecoder(r.Body).Decode(&creds)
+	if err != nil {
+		// If the structure of the body is wrong, return an HTTP error
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// Add new user
+	log.Print("Add user with Username = ", creds.Username)
+	users[creds.Username] = creds.Password
+
+	w.WriteHeader(http.StatusCreated)
 }
 
 // Signin is a function
