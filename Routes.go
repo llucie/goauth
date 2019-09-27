@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// Signup is a function
+// Signup creates an entry in the users Credentials map
 func Signup(w http.ResponseWriter, r *http.Request) {
 	log.Print("Received AddUser request")
 	var creds Credentials
@@ -27,7 +27,7 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// Signin is a function
+// Signin creates a token for the input user if present in the authorized users map
 func Signin(w http.ResponseWriter, r *http.Request) {
 	var creds Credentials
 	// Get the JSON body and decode into credentials
@@ -52,20 +52,25 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	createSession(w, creds.Username)
 }
 
-// Refresh is a function
+// Refresh creates a new session token for the user
 func Refresh(w http.ResponseWriter, r *http.Request) {
 	// Retrieve the user's session
-	username := getSession(w, r)
+	username, err := getSession(w, r)
 
-	// Now, create a new session token for the current user
-	createSession(w, username)
+	if err == nil {
+		// Now, create a new session token for the current user
+		createSession(w, username)
+	}
 }
 
-// Welcome is a function
+// Welcome returns a Welcome message if the user is authorized
 func Welcome(w http.ResponseWriter, r *http.Request) {
-	// Retrieve the user's session
-	username := getSession(w, r)
+	log.Print("Welcome route")
 
-	// Finally, return the welcome message to the user
-	w.Write([]byte(fmt.Sprintf("Welcome %s!", username)))
+	// Retrieve the user's session
+	username, err := getSession(w, r)
+	if err == nil {
+		// Return the welcome message to the user
+		w.Write([]byte(fmt.Sprintf("Welcome %s!", username)))
+	}
 }
