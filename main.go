@@ -15,7 +15,7 @@ func main() {
 	router := mux.NewRouter()
 
 	// Set up router endpoints
-	router.Methods("PUT").Path("/signin").HandlerFunc(AddUser)
+	router.Methods("PUT").Path("/signin").HandlerFunc(Signup)
 	router.Methods("POST").Path("/signin").HandlerFunc(Signin)
 	router.Methods("POST").Path("/refresh").HandlerFunc(Refresh)
 	router.Methods("GET").Path("/welcome").HandlerFunc(Welcome)

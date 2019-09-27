@@ -1,14 +1,16 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
+	"github.com/gomodule/redigo/redis"
 	"github.com/google/uuid"
 )
+
+// Store the redis connection as a package level variable
+var cache redis.Conn
 
 var users = map[string]string{}
 
@@ -18,53 +20,29 @@ type Credentials struct {
 	Username string `json:"username"`
 }
 
-// AddUser is a function
-func AddUser(w http.ResponseWriter, r *http.Request) {
-	log.Print("Received AddUser request")
-	var creds Credentials
-
-	// Get the JSON body and decode into credentials
-	err := json.NewDecoder(r.Body).Decode(&creds)
+// InitCache is a function
+func InitCache() {
+	// Initialize the redis connection to a redis instance running on your local machine
+	conn, err := redis.DialURL("redis://localhost")
 	if err != nil {
-		// If the structure of the body is wrong, return an HTTP error
-		w.WriteHeader(http.StatusBadRequest)
-		return
+		panic(err)
 	}
-
-	// Add new user
-	log.Print("Add user with Username = ", creds.Username)
-	users[creds.Username] = creds.Password
-
-	w.WriteHeader(http.StatusCreated)
+	// Assign the connection to the package level `cache` variable
+	cache = conn
 }
 
-// Signin is a function
-func Signin(w http.ResponseWriter, r *http.Request) {
-	var creds Credentials
-	// Get the JSON body and decode into credentials
-	err := json.NewDecoder(r.Body).Decode(&creds)
-	if err != nil {
-		// If the structure of the body is wrong, return an HTTP error
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	// Get the expected password from our in memory map
-	expectedPassword, ok := users[creds.Username]
-
-	// If a password exists for the given user
-	// AND, if it is the same as the password we received, the we can move ahead
-	// if NOT, then we return an "Unauthorized" status
-	if !ok || expectedPassword != creds.Password {
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-
+func createSession(w http.ResponseWriter, username string) {
 	// Create a new random session token
-	sessionToken, _ := uuid.NewUUID()
+	sessionToken, err := uuid.NewUUID()
+	if err != nil {
+		// Fail to generate an UUID, return an internal server error
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	// Set the token in the cache, along with the user whom it represents
-	// The token has an expiry time of 120 seconds
-	_, err = cache.Do("SETEX", sessionToken, "120", creds.Username)
+	// The token has an expiry time of 5 minutes
+	_, err = cache.Do("SETEX", sessionToken, "300", username)
 	if err != nil {
 		// If there is an error in setting the cache, return an internal server error
 		w.WriteHeader(http.StatusInternalServerError)
@@ -72,58 +50,41 @@ func Signin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Finally, we set the client cookie for "session_token" as the session token we just generated
-	// we also set an expiry time of 120 seconds, the same as the cache
+	// we also set an expiry time of 5 seconds, the same as the cache
 	http.SetCookie(w, &http.Cookie{
 		Name:    "session_token",
 		Value:   sessionToken.String(),
-		Expires: time.Now().Add(120 * time.Second),
+		Expires: time.Now().Add(5 * time.Minute),
 	})
 }
 
-// Refresh is a function
-func Refresh(w http.ResponseWriter, r *http.Request) {
-	// (BEGIN) The code uptil this point is the same as the first part of the `Welcome` route
+func getSession(w http.ResponseWriter, r *http.Request) string {
+	// We can obtain the session token from the requests cookies, which come with every request
 	c, err := r.Cookie("session_token")
 	if err != nil {
 		if err == http.ErrNoCookie {
+			// If the cookie is not set, return an unauthorized status
 			w.WriteHeader(http.StatusUnauthorized)
-			return
+			return ""
 		}
+		// For any other type of error, return a bad request status
 		w.WriteHeader(http.StatusBadRequest)
-		return
+		return ""
 	}
 	sessionToken := c.Value
 
+	// We then get the name of the user from our cache, where we set the session token
 	response, err := cache.Do("GET", sessionToken)
 	if err != nil {
+		// If there is an error fetching from cache, return an internal server error status
 		w.WriteHeader(http.StatusInternalServerError)
-		return
+		return ""
 	}
 	if response == nil {
+		// If the session token is not present in cache, return an unauthorized error
 		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	// (END) The code uptil this point is the same as the first part of the `Welcome` route
-
-	// Now, create a new session token for the current user
-	newSessionToken, _ := uuid.NewUUID()
-	_, err = cache.Do("SETEX", newSessionToken, "120", fmt.Sprintf("%s", response))
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+		return ""
 	}
 
-	// Delete the older session token
-	_, err = cache.Do("DEL", sessionToken)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	// Set the new token as the users `session_token` cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:    "session_token",
-		Value:   newSessionToken.String(),
-		Expires: time.Now().Add(120 * time.Second),
-	})
+	return fmt.Sprintf("%s", response)
 }
